@@ -133,7 +133,7 @@ async function createGames(products) {
 
         await setImage({ image: product.image, game, filename: game.slug });
 
-        for (const image of product.gallery.slice(0, 5)) {
+        for (const image of product.gallery.slice(0, 2)) {
           await setImage({
             image,
             game,
