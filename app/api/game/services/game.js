@@ -7,81 +7,106 @@
 
 const axios = require("axios");
 const slugify = require("slugify");
+const qs = require("qs");
 
 async function timeout(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+async function Exception(error) {
+  return {
+    error,
+    data: error.data && error.data.errors && error.data.errors,
+  };
+}
+
 async function getByName(name, entityName) {
-  const item = await strapi.services[entityName].find({ name });
-  return item.length ? item[0] : null;
+  try {
+    const item = await strapi.services[entityName].find({ name });
+    return item.length ? item[0] : null;
+  } catch (error) {
+    console.log("getByName", Exception(error));
+  }
 }
 
 async function create(name, entityName) {
-  const item = await getByName(name, entityName);
+  try {
+    const item = await getByName(name, entityName);
 
-  if (!item) {
-    await strapi.services[entityName].create({
-      name,
-      slug: slugify(name, { lower: true }),
-    });
+    if (!item) {
+      await strapi.services[entityName].create({
+        name,
+        slug: slugify(name, { lower: true }),
+      });
+    }
+  } catch (error) {
+    console.log("create", Exception(error));
   }
 }
 
 async function getGameInfo(slug) {
-  const jsdom = require("jsdom");
-  const { JSDOM } = jsdom;
+  try {
+    const jsdom = require("jsdom");
+    const { JSDOM } = jsdom;
 
-  const body = await axios.get(`https://www.gog.com/game/${slug}`);
-  const dom = new JSDOM(body.data);
+    const body = await axios.get(`https://www.gog.com/game/${slug}`);
+    const dom = new JSDOM(body.data);
 
-  const ratingValue =
-    dom.window.document.querySelector(".age-restrictions__icon > use")
-      ?.attributes[0].nodeValue ?? "BR0";
-  const rating = ratingValue
-    ? ratingValue.replace("#", "").replace("_", "")
-    : rating;
-  const description = dom.window.document.querySelector(".description");
+    const ratingValue =
+      dom.window.document.querySelector(".age-restrictions__icon > use")
+        ?.attributes[0].nodeValue ?? "BR0";
+    const rating = ratingValue
+      ? ratingValue.replace("#", "").replace("_", "")
+      : rating;
+    const description = dom.window.document.querySelector(".description");
 
-  return {
-    rating,
-    short_description: description.textContent.slice(0, 160),
-    description: description.innerHTML,
-  };
+    return {
+      rating,
+      short_description: description.textContent.slice(0, 160),
+      description: description.innerHTML,
+    };
+  } catch (error) {
+    console.log("getGameInfo", Exception(error));
+  }
 }
 
 async function createManyToManyData(products) {
-  const developers = {};
-  const publishers = {};
-  const categories = {};
-  const platforms = {};
+  try {
+    const developers = {};
+    const publishers = {};
+    const categories = {};
+    const platforms = {};
 
-  products.forEach((product) => {
-    const { developer, publisher, genres, supportedOperatingSystems } = product;
+    products.forEach((product) => {
+      const { developer, publisher, genres, supportedOperatingSystems } =
+        product;
 
-    genres &&
-      genres.forEach((item) => {
-        categories[item] = true;
-      });
-    supportedOperatingSystems &&
-      supportedOperatingSystems.forEach((item) => {
-        platforms[item] = true;
-      });
-    developers[developer] = true;
-    publishers[publisher] = true;
-  });
+      genres &&
+        genres.forEach((item) => {
+          categories[item] = true;
+        });
+      supportedOperatingSystems &&
+        supportedOperatingSystems.forEach((item) => {
+          platforms[item] = true;
+        });
+      developers[developer] = true;
+      publishers[publisher] = true;
+    });
 
-  return Promise.all([
-    ...Object.keys(developers).map((name) => create(name, "developer")),
-    ...Object.keys(publishers).map((name) => create(name, "publisher")),
-    ...Object.keys(categories).map((name) => create(name, "category")),
-    ...Object.keys(platforms).map((name) => create(name, "platform")),
-  ]);
+    return Promise.all([
+      ...Object.keys(developers).map((name) => create(name, "developer")),
+      ...Object.keys(publishers).map((name) => create(name, "publisher")),
+      ...Object.keys(categories).map((name) => create(name, "category")),
+      ...Object.keys(platforms).map((name) => create(name, "platform")),
+    ]);
+  } catch (error) {
+    console.log("createManyToManyData", Exception(error));
+  }
 }
 
 async function createGames(products) {
-  await Promise.all(
-    products.map(async (product) => {
+  try {
+    for (const product of products) {
       const item = await getByName(product.title, "game");
 
       if (!item) {
@@ -112,14 +137,16 @@ async function createGames(products) {
           await setImage({
             image,
             game,
-            filename: game.slug,
+            filename: `${game.slug}-${product.gallery.indexOf(image)}`,
             field: "gallery",
           });
-          await timeout(1000);
+          await timeout(200);
         }
       }
-    })
-  );
+    }
+  } catch (error) {
+    console.log("createGames", Exception(error));
+  }
 }
 
 async function setImage({ image, game, filename, field = "cover" }) {
@@ -149,15 +176,17 @@ async function setImage({ image, game, filename, field = "cover" }) {
 }
 
 module.exports = {
-  populate: async (params) => {
-    const gogApiUrl = `https://www.gog.com/games/ajax/filtered?mediaType=game&page=1&sort=popularity`;
+  populate: async (query) => {
+    const gogApiUrl = `https://www.gog.com/games/ajax/filtered?${qs.stringify(
+      query
+    )}`;
 
     const {
       data: { products },
     } = await axios.get(gogApiUrl);
 
-    await createManyToManyData([products[22]]);
+    await createManyToManyData(products);
 
-    await createGames([products[22]]);
+    await createGames(products);
   },
 };
