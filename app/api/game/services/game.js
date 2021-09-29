@@ -32,7 +32,6 @@ async function getGameInfo(slug) {
   const jsdom = require("jsdom");
   const { JSDOM } = jsdom;
 
-  console.log(`https://www.gog.com/game/${slug}`);
   const body = await axios.get(`https://www.gog.com/game/${slug}`);
   const dom = new JSDOM(body.data);
 
@@ -107,19 +106,23 @@ async function createGames(products) {
           ...(await getGameInfo(product.slug)),
         });
 
-        await setImage({ image: product.image, game });
-        await Promise.all(
-          product.gallery.slice(0, 2).map(async (url) => {
-            await setImage({ image: url, game, field: "gallery" });
-            await timeout(1000);
-          })
-        );
+        await setImage({ image: product.image, game, filename: game.slug });
+
+        for (const image of product.gallery.slice(0, 5)) {
+          await setImage({
+            image,
+            game,
+            filename: game.slug,
+            field: "gallery",
+          });
+          await timeout(1000);
+        }
       }
     })
   );
 }
 
-async function setImage({ image, game, field = "cover" }) {
+async function setImage({ image, game, filename, field = "cover" }) {
   const url = `https:${image}_bg_crop_1680x655.jpg`;
   const { data } = await axios.get(url, { responseType: "arraybuffer" });
   const buffer = Buffer.from(data, "base64");
@@ -130,9 +133,9 @@ async function setImage({ image, game, field = "cover" }) {
   formData.append("refId", game.id);
   formData.append("ref", "game");
   formData.append("field", field);
-  formData.append("files", buffer, { filename: `${game.slug}.jpg` });
+  formData.append("files", buffer, { filename: `${filename}.jpg` });
 
-  console.info(`Uploading ${field} image: ${game.slug}.jpg`);
+  console.info(`Uploading ${field} image ${filename}.jpg`);
 
   await axios.post(
     `http://${strapi.config.host}:${strapi.config.port}/upload`,
@@ -153,7 +156,8 @@ module.exports = {
       data: { products },
     } = await axios.get(gogApiUrl);
 
-    await createManyToManyData([products[10]]);
-    await createGames([products[10]]);
+    await createManyToManyData([products[22]]);
+
+    await createGames([products[22]]);
   },
 };
