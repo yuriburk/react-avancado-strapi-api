@@ -36,7 +36,7 @@ async function create(name, entityName) {
     if (!item) {
       await strapi.services[entityName].create({
         name,
-        slug: slugify(name, { lower: true }),
+        slug: slugify(name.replace(/[^a-zA-Z0-9 ]/g, ""), { lower: true }),
       });
     }
   } catch (error) {
@@ -106,44 +106,48 @@ async function createManyToManyData(products) {
 
 async function createGames(products) {
   try {
-    for (const product of products) {
-      const item = await getByName(product.title, "game");
+    await Promise.all(
+      products.map(async (product) => {
+        const item = await getByName(product.title, "game");
 
-      if (!item) {
-        console.info(`Creating ${product.title}`);
-        const game = await strapi.services.game.create({
-          name: product.title,
-          slug: product.slug.replace("_", "-"),
-          price: product.price.amount,
-          release_date: new Date(
-            Number(product.globalReleaseDate) * 1000
-          ).toISOString(),
-          categories: await Promise.all(
-            product.genres.map((name) => getByName(name, "category"))
-          ),
-          platforms: await Promise.all(
-            product.supportedOperatingSystems.map((name) =>
-              getByName(name, "platform")
-            )
-          ),
-          developers: [await getByName(product.developer, "developer")],
-          publisher: await getByName(product.publisher, "publisher"),
-          ...(await getGameInfo(product.slug)),
-        });
-
-        await setImage({ image: product.image, game, filename: game.slug });
-
-        for (const image of product.gallery.slice(0, 2)) {
-          await setImage({
-            image,
-            game,
-            filename: `${game.slug}-${product.gallery.indexOf(image)}`,
-            field: "gallery",
+        if (!item) {
+          console.info(`Creating ${product.title}`);
+          const game = await strapi.services.game.create({
+            name: product.title,
+            slug: product.slug.replace("_", "-").replace(/[^a-zA-Z0-9 ]/g, ""),
+            price: product.price.amount,
+            release_date: new Date(
+              Number(product.globalReleaseDate) * 1000
+            ).toISOString(),
+            categories: await Promise.all(
+              product.genres.map((name) => getByName(name, "category"))
+            ),
+            platforms: await Promise.all(
+              product.supportedOperatingSystems.map((name) =>
+                getByName(name, "platform")
+              )
+            ),
+            developers: [await getByName(product.developer, "developer")],
+            publisher: await getByName(product.publisher, "publisher"),
+            ...(await getGameInfo(product.slug)),
           });
-          await timeout(200);
+
+          await setImage({ image: product.image, game, filename: game.slug });
+
+          await Promise.all(
+            product.gallery.slice(0, 5).map(async (image) => {
+              await setImage({
+                image,
+                game,
+                filename: `${game.slug}-${product.gallery.indexOf(image)}`,
+                field: "gallery",
+              });
+              await timeout(200);
+            })
+          );
         }
-      }
-    }
+      })
+    );
   } catch (error) {
     console.log("createGames", Exception(error));
   }
@@ -177,16 +181,18 @@ async function setImage({ image, game, filename, field = "cover" }) {
 
 module.exports = {
   populate: async (query) => {
-    const gogApiUrl = `https://www.gog.com/games/ajax/filtered?${qs.stringify(
-      query
-    )}`;
+    for (let page = 1; page <= 15; page++) {
+      const gogApiUrl = `https://www.gog.com/games/ajax/filtered?${qs.stringify(
+        query
+      )}&page=${page}`;
 
-    const {
-      data: { products },
-    } = await axios.get(gogApiUrl);
+      const {
+        data: { products },
+      } = await axios.get(gogApiUrl);
 
-    await createManyToManyData(products);
+      await createManyToManyData(products);
 
-    await createGames(products);
+      await createGames(products);
+    }
   },
 };
